@@ -3,14 +3,18 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
+from datetime import datetime
+from pathlib import Path
+import hashlib
 
 st.set_page_config(
-    page_title="AI Car Classifier",
+    page_title="AutoVision AI | Car Classifier",
     page_icon="🚘",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Keep this order aligned with the model's original training labels.
 CLASS_NAMES = [
     "Audi",
     "Hyundai Creta",
@@ -21,225 +25,457 @@ CLASS_NAMES = [
     "Toyota Innova"
 ]
 
+MODEL_PATH = Path("final_car_model.keras")
+
+# Premium styling and animations
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 .stApp {
-    background: linear-gradient(135deg, #06101f, #0b1530 65%, #160d2c);
-    color: #f1f5ff;
-}
-[data-testid="stSidebar"] {
-    background: #081326;
-    border-right: 1px solid #243957;
+    background:
+        radial-gradient(ellipse at 85% 0%, #17265a 0%, transparent 38%),
+        linear-gradient(135deg, #050b18, #08152b 55%, #110d28);
+    color: #f4f7ff;
+    font-family: 'Inter', sans-serif;
 }
 .block-container {
-    padding-top: 2rem;
+    max-width: 1500px;
+    padding-top: 1.6rem;
     padding-bottom: 3rem;
-    max-width: 1450px;
+}
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #071226, #0b1023);
+    border-right: 1px solid #26385b;
 }
 .hero {
-    padding: 28px;
-    border: 1px solid #263e69;
-    border-radius: 22px;
-    background: linear-gradient(115deg, #10264a, #17183d, #291345);
-    margin-bottom: 25px;
+    padding: 32px;
+    border: 1px solid #3c4c91;
+    border-radius: 24px;
+    background: linear-gradient(115deg, #102d54dd, #1a1645dd, #311345cc);
+    margin-bottom: 24px;
+    animation: appear .65s ease-out;
+    box-shadow: 0 12px 45px #03081766;
 }
 .hero h1 {
-    font-size: clamp(2rem, 4vw, 3.3rem);
-    margin-bottom: 8px;
-    color: #ffffff;
-}
-.hero p { color: #c5d7f6; font-size: 1.08rem; }
-.panel {
-    padding: 22px;
-    border: 1px solid #2a4165;
-    border-radius: 18px;
-    background: rgba(9, 23, 44, 0.88);
-    margin-bottom: 18px;
+    font-size: clamp(2rem, 4vw, 3.4rem);
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    background: linear-gradient(90deg, #ffffff, #63c9ff, #c48bff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 .eyebrow {
-    color: #8abaff;
-    text-transform: uppercase;
+    color: #79caff;
     letter-spacing: 2px;
+    text-transform: uppercase;
     font-size: .75rem;
     font-weight: 700;
 }
-.result {
+.muted { color: #b5c5e5; }
+.panel {
     padding: 22px;
-    border-radius: 16px;
-    background: linear-gradient(120deg, #123d59, #292052);
-    border: 1px solid #5366d7;
+    border: 1px solid #293f69;
+    border-radius: 19px;
+    background: linear-gradient(145deg, #0c1c35ee, #0a1228ee);
+    margin-bottom: 18px;
+    transition: transform .25s ease, border-color .25s ease,
+                box-shadow .25s ease;
+    box-shadow: 0 8px 25px #02081730;
 }
-.small-muted { color: #afc2e1; }
+.panel:hover {
+    transform: translateY(-3px);
+    border-color: #6c75ef;
+    box-shadow: 0 10px 30px #4c42a522;
+}
+.metric {
+    padding: 18px;
+    border: 1px solid #304876;
+    border-radius: 16px;
+    background: linear-gradient(140deg, #102747, #171637);
+    transition: transform .2s ease;
+}
+.metric:hover { transform: translateY(-3px); }
+.result {
+    border: 1px solid #6374f5;
+    border-radius: 18px;
+    padding: 22px;
+    background: linear-gradient(120deg, #103d59, #282052);
+    animation: appear .5s ease-out;
+}
+.car-card {
+    padding: 14px;
+    min-height: 100px;
+    text-align: center;
+    border-radius: 15px;
+    border: 1px solid #2e456d;
+    background: linear-gradient(145deg, #10223f, #11132b);
+    transition: all .25s ease;
+}
+.car-card:hover {
+    transform: translateY(-4px) scale(1.01);
+    border-color: #9b6bff;
+}
 div.stButton > button {
-    background: linear-gradient(90deg, #168bff, #9147ff);
-    color: white;
-    border: none;
+    border: 1px solid #6d6cf4;
     border-radius: 12px;
-    padding: 0.65rem 1rem;
+    background: linear-gradient(90deg, #087fff, #7047ff, #bd36ef);
+    color: white;
     font-weight: 700;
-    width: 100%;
+    min-height: 44px;
+    transition: all .2s ease;
 }
 div.stButton > button:hover {
-    border: 1px solid #b9a5ff;
+    border-color: #bba8ff;
+    box-shadow: 0 0 22px #7253ff66;
+    transform: translateY(-1px);
     color: white;
 }
 [data-testid="stFileUploader"] {
-    border: 1px dashed #5176ac;
-    border-radius: 15px;
+    border: 1px dashed #6278d8;
+    border-radius: 16px;
     padding: 12px;
-    background: #0b1930;
+    background: #0c1a32;
 }
-hr { border-color: #253958; }
+hr { border-color: #293c5d; }
+@keyframes appear {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
+
 @st.cache_resource
 def load_model():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            "final_car_model.keras is missing from the app folder."
+        )
     return tf.keras.models.load_model(
-        "final_car_model.keras",
+        str(MODEL_PATH),
         compile=False
     )
 
+
+def predict_car(image):
+    model = load_model()
+    resized = image.resize((224, 224))
+    array = np.asarray(resized, dtype=np.float32)
+    array = np.expand_dims(array, axis=0)
+
+    scores = np.asarray(
+        model.predict(array, verbose=0)[0]
+    ).flatten()
+
+    if len(scores) != len(CLASS_NAMES):
+        raise ValueError(
+            f"Model returned {len(scores)} scores, "
+            f"but {len(CLASS_NAMES)} class names are configured."
+        )
+
+    index = int(np.argmax(scores))
+    return index, scores
+
+
+# Session-only prediction history
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "last_upload_hash" not in st.session_state:
+    st.session_state.last_upload_hash = None
+
+if "current_result" not in st.session_state:
+    st.session_state.current_result = None
+
+
+# Sidebar
 with st.sidebar:
     st.markdown("# 🚘 AutoVision AI")
-    st.caption("UPLOAD  •  PREDICT  •  EXPLORE")
+    st.caption("SMART CAR RECOGNITION")
     st.divider()
+
     page = st.radio(
         "NAVIGATION",
-        ["🏠 Home", "📘 About", "⚙️ How It Works", "🧠 Model Info"]
+        ["🏠 Home", "🖼️ Car Gallery", "🕘 Prediction History",
+         "🧠 Model Information", "ℹ️ About"],
+        label_visibility="collapsed"
     )
-    st.divider()
-    st.markdown("### ✨ Smarter AI")
-    st.caption("Deep learning meets automotive recognition.")
-    st.caption("Built with Streamlit and TensorFlow.")
 
+    st.divider()
+    st.markdown("#### 🚗 Supported categories")
+    for name in CLASS_NAMES:
+        st.caption(f"✦  {name}")
+
+    st.divider()
+    st.caption("Powered by Python · TensorFlow · Streamlit")
+
+
+# Hero header
 st.markdown("""
 <div class="hero">
-  <div class="eyebrow">AI POWERED · COMPUTER VISION</div>
-  <h1>🚗 AI Car Classifier</h1>
-  <p>Upload a car photo. Let artificial intelligence predict its category.</p>
+  <div class="eyebrow">✦ AI POWERED · COMPUTER VISION</div>
+  <h1>AI Car Classifier</h1>
+  <p class="muted">
+    Upload a car photo and discover its predicted category
+    with your trained deep-learning model.
+  </p>
 </div>
 """, unsafe_allow_html=True)
 
+
 if page == "🏠 Home":
-    a, b, c = st.columns(3)
-    with a:
-        st.markdown('<div class="panel">⚡ <b>Fast predictions</b><br><span class="small-muted">Deep learning model</span></div>', unsafe_allow_html=True)
-    with b:
-        st.markdown('<div class="panel">🎯 <b>7 car classes</b><br><span class="small-muted">Trained categories</span></div>', unsafe_allow_html=True)
-    with c:
-        st.markdown('<div class="panel">🖼️ <b>Easy image upload</b><br><span class="small-muted">JPG, JPEG and PNG</span></div>', unsafe_allow_html=True)
+    m1, m2, m3 = st.columns(3)
 
-    left, right = st.columns([1.1, 0.9], gap="large")
-
-    with left:
-        st.markdown('<div class="panel"><h3>📤 Upload your car image</h3><p class="small-muted">Choose a clear photo showing the vehicle.</p></div>', unsafe_allow_html=True)
-
-        uploaded_file = st.file_uploader(
-            "Choose an image",
-            type=["jpg", "jpeg", "png"],
-            help="Supported formats: JPG, JPEG, PNG"
-        )
-
-        if uploaded_file:
-            try:
-                image = Image.open(uploaded_file).convert("RGB")
-                st.image(image, caption="Your uploaded image", use_container_width=True)
-
-                if st.button("✨ Identify This Car", type="primary"):
-                    with st.spinner("AI is analysing your image..."):
-                        model = load_model()
-                        resized = image.resize((224, 224))
-                        array = np.asarray(resized, dtype=np.float32)
-                        array = np.expand_dims(array, axis=0)
-
-                        predictions = np.asarray(
-                            model.predict(array, verbose=0)[0]
-                        ).flatten()
-
-                        if len(predictions) != len(CLASS_NAMES):
-                            st.error(
-                                "Model output does not match the 7 class names. "
-                                "Please check the model and class order."
-                            )
-                        else:
-                            index = int(np.argmax(predictions))
-                            confidence = float(predictions[index]) * 100
-
-                            st.session_state["car_result"] = {
-                                "name": CLASS_NAMES[index],
-                                "confidence": confidence,
-                                "scores": predictions.tolist()
-                            }
-            except Exception as e:
-                st.error(f"Could not process the image: {e}")
-
-    with right:
-        st.markdown('<div class="panel"><h3>🔮 Prediction Result</h3><p class="small-muted">Your AI result will appear here.</p></div>', unsafe_allow_html=True)
-
-        result = st.session_state.get("car_result")
-
-        if result:
-            st.markdown(
-                f'<div class="result"><div class="eyebrow">PREDICTED CATEGORY</div>'
-                f'<h2>🚘 {result["name"]}</h2>'
-                f'<p>Model confidence: <b>{result["confidence"]:.2f}%</b></p></div>',
-                unsafe_allow_html=True
-            )
-            st.progress(
-                min(100, max(0, int(result["confidence"]))),
-                text="Prediction confidence"
-            )
-
-            st.markdown("#### 📊 Class scores")
-            scores = result["scores"]
-            for i in np.argsort(scores)[::-1]:
-                st.write(
-                    f"**{CLASS_NAMES[int(i)]}** — "
-                    f"{float(scores[int(i)]) * 100:.2f}%"
-                )
-        else:
-            st.info("Upload an image and click Identify This Car to see your result.")
-            st.markdown("#### 🚙 Available categories")
-            for name in CLASS_NAMES:
-                st.write(f"• {name}")
-
-    st.divider()
-    st.markdown("### 💡 Tips for better predictions")
-    t1, t2, t3 = st.columns(3)
-    t1.info("Use a clear, well-lit car photo.")
-    t2.info("Keep the vehicle visible in the frame.")
-    t3.info("Try a different angle if the result looks incorrect.")
-
-elif page == "📘 About":
-    st.markdown('<div class="panel"><h2>About this project</h2><p>This project uses a trained deep-learning image classification model to predict which of seven car categories an uploaded image belongs to.</p></div>', unsafe_allow_html=True)
-    st.markdown("#### Supported categories")
-    for name in CLASS_NAMES:
-        st.write(f"🚗 {name}")
-
-elif page == "⚙️ How It Works":
-    st.markdown("### From image to prediction")
-    for n, title, desc in [
-        (1, "Upload", "Select a JPG, JPEG or PNG car image."),
-        (2, "Preprocess", "The image is resized to 224 × 224 pixels."),
-        (3, "Predict", "The trained model calculates class scores."),
-        (4, "Display", "The app shows the highest-scoring class and confidence.")
-    ]:
+    with m1:
         st.markdown(
-            f'<div class="panel"><h3>{n}. {title}</h3><p class="small-muted">{desc}</p></div>',
+            '<div class="metric">⚡ <b>AI Prediction</b>'
+            '<p class="muted">Model-powered recognition</p></div>',
+            unsafe_allow_html=True
+        )
+    with m2:
+        st.markdown(
+            '<div class="metric">🚘 <b>7 Categories</b>'
+            '<p class="muted">Seven trained car labels</p></div>',
+            unsafe_allow_html=True
+        )
+    with m3:
+        st.markdown(
+            '<div class="metric">📊 <b>Score Breakdown</b>'
+            '<p class="muted">Compare all class scores</p></div>',
             unsafe_allow_html=True
         )
 
-elif page == "🧠 Model Info":
-    st.markdown("### Model information")
+    left, right = st.columns([1.05, .95], gap="large")
+
+    with left:
+        st.markdown("### 📤 Upload your car")
+        st.markdown(
+            '<p class="muted">Use a clear JPG, JPEG or PNG photo.</p>',
+            unsafe_allow_html=True
+        )
+
+        upload = st.file_uploader(
+            "Choose a car image",
+            type=["jpg", "jpeg", "png"],
+            key="car_upload"
+        )
+
+        if upload is not None:
+            try:
+                image = Image.open(upload).convert("RGB")
+                upload_hash = hashlib.sha256(
+                    upload.getvalue()
+                ).hexdigest()
+
+                st.image(
+                    image,
+                    caption="Uploaded vehicle",
+                    use_container_width=True
+                )
+
+                if upload_hash != st.session_state.last_upload_hash:
+                    st.session_state.current_result = None
+
+                if st.button(
+                    "✨ Identify This Car",
+                    type="primary",
+                    use_container_width=True
+                ):
+                    with st.spinner("Analysing your image..."):
+                        index, scores = predict_car(image)
+
+                        result = {
+                            "name": CLASS_NAMES[index],
+                            "scores": scores.tolist(),
+                            "confidence": float(scores[index]) * 100,
+                            "time": datetime.now().strftime(
+                                "%d %b %Y, %I:%M:%S %p"
+                            ),
+                            "image": image.copy(),
+                            "image_hash": upload_hash
+                        }
+
+                        st.session_state.current_result = result
+                        st.session_state.last_upload_hash = upload_hash
+
+                        # Avoid duplicate history entries for the same
+                        # image if the user repeats the same prediction.
+                        history = st.session_state.history
+                        if not history or history[0]["image_hash"] != upload_hash:
+                            history.insert(0, result)
+                            st.session_state.history = history[:20]
+
+                        st.balloons()
+
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
+
+        st.markdown("---")
+        st.markdown("#### ✨ What can you upload?")
+        cols = st.columns(3)
+        tips = [
+            ("📷", "Clear photo"),
+            ("💡", "Good lighting"),
+            ("🚘", "Visible vehicle")
+        ]
+        for col, (emoji, label) in zip(cols, tips):
+            with col:
+                st.markdown(
+                    f'<div class="car-card">{emoji}<br><b>{label}</b></div>',
+                    unsafe_allow_html=True
+                )
+
+    with right:
+        st.markdown("### 🔮 Prediction result")
+        result = st.session_state.current_result
+
+        if result:
+            st.markdown(
+                f'<div class="result"><div class="eyebrow">'
+                f'PREDICTED CATEGORY</div><h2>🚘 {result["name"]}</h2>'
+                f'<p>Model score: <b>{result["confidence"]:.2f}%</b></p>'
+                f'<p class="muted">Analysed at {result["time"]}</p></div>',
+                unsafe_allow_html=True
+            )
+
+            st.progress(
+                min(100, max(0, int(result["confidence"]))),
+                text="Top class score"
+            )
+
+            st.markdown("#### 📊 All category scores")
+            scores = result["scores"]
+            for i in np.argsort(scores)[::-1]:
+                score = float(scores[int(i)])
+                st.write(f"**{CLASS_NAMES[int(i)]}** · {score * 100:.2f}%")
+                st.progress(min(100, max(0, int(score * 100))))
+
+            st.caption(
+                "Scores are model outputs, not guaranteed real-world "
+                "probabilities. Results may be incorrect."
+            )
+        else:
+            st.markdown(
+                '<div class="panel" style="text-align:center;padding:48px 12px">'
+                '<div style="font-size:3rem">🚘</div>'
+                '<h3>Ready to identify</h3>'
+                '<p class="muted">Upload a photo and click Identify This Car.</p>'
+                '</div>',
+                unsafe_allow_html=True
+            )
+
+        st.markdown("#### 🕘 Recent predictions")
+        if st.session_state.history:
+            for item in st.session_state.history[:3]:
+                st.write(
+                    f"🚗 **{item['name']}** · "
+                    f"{item['confidence']:.1f}% · {item['time']}"
+                )
+        else:
+            st.caption("Your recent predictions will appear here.")
+
+
+elif page == "🖼️ Car Gallery":
+    st.markdown("### Explore the seven supported classes")
+    st.markdown(
+        '<p class="muted">Select a category to learn what the model supports. '
+        'These cards describe labels; they are not prediction examples.</p>',
+        unsafe_allow_html=True
+    )
+
+    descriptions = {
+        "Audi": "Audi vehicle category",
+        "Hyundai Creta": "Hyundai Creta SUV category",
+        "Mahindra Scorpio": "Mahindra Scorpio SUV category",
+        "Rolls Royce": "Rolls Royce vehicle category",
+        "Swift": "Maruti Suzuki Swift hatchback category",
+        "Tata Safari": "Tata Safari SUV category",
+        "Toyota Innova": "Toyota Innova MPV category"
+    }
+
+    cols = st.columns(3)
+    for i, name in enumerate(CLASS_NAMES):
+        with cols[i % 3]:
+            st.markdown(
+                f'<div class="panel"><div style="font-size:2rem">🚘</div>'
+                f'<h3>{name}</h3><p class="muted">'
+                f'{descriptions[name]}</p></div>',
+                unsafe_allow_html=True
+            )
+
+    st.info(
+        "To display actual car photos in this gallery, add your own "
+        "sample images to a gallery folder in the GitHub repository."
+    )
+
+
+elif page == "🕘 Prediction History":
+    st.markdown("### 🕘 Your prediction history")
+    st.caption("History is kept for this active session only.")
+
+    if st.session_state.history:
+        if st.button("🗑️ Clear history"):
+            st.session_state.history = []
+            st.session_state.current_result = None
+            st.rerun()
+
+        for i, item in enumerate(st.session_state.history):
+            with st.expander(
+                f"{item['name']} · {item['confidence']:.2f}% · {item['time']}"
+            ):
+                st.image(item["image"], width=320)
+                st.write(f"Predicted category: **{item['name']}**")
+                st.write(f"Model score: **{item['confidence']:.2f}%**")
+    else:
+        st.info("No predictions yet. Go to Home and analyse a car image.")
+
+
+elif page == "🧠 Model Information":
+    st.markdown("### 🧠 Model details")
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.write("**Architecture:** MobileNetV2-based image classifier")
+    st.write("**Architecture:** MobileNetV2-based classifier")
     st.write("**Framework:** TensorFlow / Keras")
     st.write("**Input size:** 224 × 224 RGB")
-    st.write("**Output classes:** 7")
+    st.write("**Output categories:** 7")
     st.write("**Model file:** `final_car_model.keras`")
-    st.caption("Actual accuracy depends on the saved model and evaluation dataset. No unverified accuracy figure is displayed.")
+    st.write("**Preprocessing:** Must match the saved model's training pipeline.")
+    st.caption(
+        "Accuracy is not shown here because it should be reported from "
+        "the actual held-out test evaluation, not guessed."
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.divider()
-st.caption("AI Car Classifier · Educational project · Predictions may be incorrect.")
+    st.markdown("#### Categories")
+    for name in CLASS_NAMES:
+        st.write(f"• {name}")
+
+
+elif page == "ℹ️ About":
+    st.markdown("""
+    <div class="panel">
+      <h2>About AutoVision AI</h2>
+      <p class="muted">
+        An educational image-classification project that uses a trained
+        deep-learning model to predict one of seven car categories.
+      </p>
+      <p class="muted">
+        Predictions depend on image quality and the model's training data.
+        The result should not be treated as a guaranteed identification.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+st.markdown("---")
+st.markdown(
+    '<p style="text-align:center;color:#93a8cc">'
+    '🚘 AutoVision AI · Built with Python, TensorFlow & Streamlit</p>',
+    unsafe_allow_html=True
+)
